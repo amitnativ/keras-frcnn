@@ -127,8 +127,8 @@ rpn = nn.rpn(shared_layers, num_anchors)
 
 classifier = nn.classifier(shared_layers, roi_input, C.num_rois, nb_classes=len(classes_count), trainable=True)
 
-model_rpn = Model(img_input, rpn[:2])
-model_classifier = Model([img_input, roi_input], classifier)
+model_rpn = Model(img_input, rpn[:2])	#model rpn (input = input image, output = output class(foreground/background), rpn anchor feature map)
+model_classifier = Model([img_input, roi_input], classifier) #this is the classifier model for every bbox
 
 # this is a model that holds both the RPN and the classifier, used to load/save weights for the models
 model_all = Model([img_input, roi_input], rpn[:2] + classifier)
@@ -141,6 +141,7 @@ except:
 	print('Could not load pretrained model weights. Weights can be found in the keras application folder \
 		https://github.com/fchollet/keras/tree/master/keras/applications')
 
+#compiling the model. there is a model for rpn, classifier of every bbox, and "all" that connects both
 optimizer = Adam(lr=1e-5)
 optimizer_classifier = Adam(lr=1e-5)
 model_rpn.compile(optimizer=optimizer, loss=[losses.rpn_loss_cls(num_anchors), losses.rpn_loss_regr(num_anchors)])
@@ -178,9 +179,9 @@ for epoch_num in range(num_epochs):
 				if mean_overlapping_bboxes == 0:
 					print('RPN is not producing bounding boxes that overlap the ground truth boxes. Check RPN settings or keep training.')
 
-			X, Y, img_data = next(data_gen_train)
+			X, Y, img_data = next(data_gen_train)	#generating the next input image with all its bbox
 
-			loss_rpn = model_rpn.train_on_batch(X, Y)
+			loss_rpn = model_rpn.train_on_batch(X, Y) #IS THIS THE LOSS OF THE RPN??????
 
 			P_rpn = model_rpn.predict_on_batch(X)
 
