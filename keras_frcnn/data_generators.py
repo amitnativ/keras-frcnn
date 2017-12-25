@@ -77,6 +77,9 @@ class SampleSelector:
 
 
 def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_length_calc_function):
+# this function finds all possible anchors that overlap the groudtruth bbox, according to configuration thresholds.
+# for every anchors that passes the test, the function returns its regression loss and its class (should be background or foreground)
+# every groundtruth bbox, should have at least 1 bounding box acossiated with it
 
 	downscale = float(C.rpn_stride)
 	anchor_sizes = C.anchor_box_scales
@@ -96,15 +99,16 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 
 	num_bboxes = len(img_data['bboxes'])
 
-	num_anchors_for_bbox = np.zeros(num_bboxes).astype(int)
-	best_anchor_for_bbox = -1*np.ones((num_bboxes, 4)).astype(int)
-	best_iou_for_bbox = np.zeros(num_bboxes).astype(np.float32)
-	best_x_for_bbox = np.zeros((num_bboxes, 4)).astype(int)
-	best_dx_for_bbox = np.zeros((num_bboxes, 4)).astype(np.float32)
+	num_anchors_for_bbox = np.zeros(num_bboxes).astype(int) #number of anchors detected for specific bbox
+	best_anchor_for_bbox = -1*np.ones((num_bboxes, 4)).astype(int) #index to which anchor ratio is best for bounding box
+	best_iou_for_bbox = np.zeros(num_bboxes).astype(np.float32) # best iou of specific bbox
+	best_x_for_bbox = np.zeros((num_bboxes, 4)).astype(int)	#best x coordinate (CENTER??) of bounding box
+	best_dx_for_bbox = np.zeros((num_bboxes, 4)).astype(np.float32)	#est y coordinate (CENTER??) of bounding box
 
 	# get the GT box coordinates, and resize to account for image resizing
 	gta = np.zeros((num_bboxes, 4))
-	for bbox_num, bbox in enumerate(img_data['bboxes']):
+	for bbox_num, bbox in enumerate(img_data['bboxes']): 
+		# go over all bounding boxes in the image, and get its coordinates. then resize the coordinate to account for NN image resizing
 		# get the GT box coordinates, and resize to account for image resizing
 		gta[bbox_num, 0] = bbox['x1'] * (resized_width / float(width))
 		gta[bbox_num, 1] = bbox['x2'] * (resized_width / float(width))
@@ -113,27 +117,35 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 	
 	# rpn ground truth
 
+	# go over all anchor sizes:
 	for anchor_size_idx in range(len(anchor_sizes)):
+		# go over all anchor ratios, for each anchor size:
 		for anchor_ratio_idx in range(n_anchratios):
+			# get the (x,y) coordinate for each anchor (is it the corner or the center??)--> i think it width/height!!
 			anchor_x = anchor_sizes[anchor_size_idx] * anchor_ratios[anchor_ratio_idx][0]
 			anchor_y = anchor_sizes[anchor_size_idx] * anchor_ratios[anchor_ratio_idx][1]	
 			
+			# scan the output feature map
 			for ix in range(output_width):					
 				# x-coordinates of the current anchor box	
-				x1_anc = downscale * (ix + 0.5) - anchor_x / 2
+				# these are the x coordiantes of current anchor
+				x1_anc = downscale * (ix + 0.5) - anchor_x / 2	
 				x2_anc = downscale * (ix + 0.5) + anchor_x / 2	
 				
-				# ignore boxes that go across image boundaries					
+				# ignore boxes that go across image boundaries		
+				# ignore anchors that go across image boundries
 				if x1_anc < 0 or x2_anc > resized_width:
 					continue
 					
 				for jy in range(output_height):
 
 					# y-coordinates of the current anchor box
+					# these are the y coordiantes of current anchor
 					y1_anc = downscale * (jy + 0.5) - anchor_y / 2
 					y2_anc = downscale * (jy + 0.5) + anchor_y / 2
 
 					# ignore boxes that go across image boundaries
+					# ignore the anchors that go across image boundries
 					if y1_anc < 0 or y2_anc > resized_height:
 						continue
 
@@ -144,7 +156,7 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 					# note that this is different from the best IOU for a GT bbox
 					best_iou_for_loc = 0.0
 
-					for bbox_num in range(num_bboxes):
+					for bbox_num in range(num_bboxes): #num_bbox is the total number of bbox in the image
 						
 						# get IOU of the current GT box and the current anchor box
 						curr_iou = iou([gta[bbox_num, 0], gta[bbox_num, 2], gta[bbox_num, 1], gta[bbox_num, 3]], [x1_anc, y1_anc, x2_anc, y2_anc])
