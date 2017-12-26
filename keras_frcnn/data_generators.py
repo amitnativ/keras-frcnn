@@ -77,6 +77,9 @@ class SampleSelector:
 
 
 def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_length_calc_function):
+	# outputs:
+	#	y_rpn_class (1/0 for foreground/background)
+	#	y_rpn_reg (regression error of the proposed rpn??)
 
 	downscale = float(C.rpn_stride)
 	anchor_sizes = C.anchor_box_scales
@@ -112,14 +115,15 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 		gta[bbox_num, 3] = bbox['y2'] * (resized_height / float(height))
 	
 	# rpn ground truth
-
-	for anchor_size_idx in range(len(anchor_sizes)):
-		for anchor_ratio_idx in range(n_anchratios):
-			anchor_x = anchor_sizes[anchor_size_idx] * anchor_ratios[anchor_ratio_idx][0]
-			anchor_y = anchor_sizes[anchor_size_idx] * anchor_ratios[anchor_ratio_idx][1]	
+	#SCAN EVERY POSSIBLE ANCHOR ON THE FEATURE MAP
+	for anchor_size_idx in range(len(anchor_sizes)):	#iterate over all anchor sizes
+		for anchor_ratio_idx in range(n_anchratios):	#iterate over all anchor ratios
+			anchor_x = anchor_sizes[anchor_size_idx] * anchor_ratios[anchor_ratio_idx][0]	#width of anchor
+			anchor_y = anchor_sizes[anchor_size_idx] * anchor_ratios[anchor_ratio_idx][1]	#height of anchor
 			
-			for ix in range(output_width):					
-				# x-coordinates of the current anchor box	
+			for ix in range(output_width):	#scan feature map in X				
+				# x-coordinates of the current anchor box - get the two x coreners of the bounding box.
+				# a donw scale is used to move from image heightXwidth to feature map heightXwidth
 				x1_anc = downscale * (ix + 0.5) - anchor_x / 2
 				x2_anc = downscale * (ix + 0.5) + anchor_x / 2	
 				
@@ -127,9 +131,9 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 				if x1_anc < 0 or x2_anc > resized_width:
 					continue
 					
-				for jy in range(output_height):
+				for jy in range(output_height): #scan featue map in y
 
-					# y-coordinates of the current anchor box
+					# y-coordinates of the current anchor box. get the two x coreners of the bounding box in feature map coordinates
 					y1_anc = downscale * (jy + 0.5) - anchor_y / 2
 					y2_anc = downscale * (jy + 0.5) + anchor_y / 2
 
@@ -144,7 +148,26 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 					# note that this is different from the best IOU for a GT bbox
 					best_iou_for_loc = 0.0
 
-					for bbox_num in range(num_bboxes):
+					for bbox_num in range(num_bboxes):	# for every anchor size, in every position, calculate:
+										# iou with every possible gt bbox
+										# if current anchor iou with gtbbox is better, or hiegher than a threshold
+											# calculate the regression scores(cx,cy,cxa,cya,tx,ty,tw,th)
+										# if current gtbbox is not of BG 
+										   #if anchor iou is best so far
+											#save anchor position, size and ratio
+											#save best iou
+											#save anchor [x1,y1,x2,y2]
+											#save anchor [tx,ty,tw,th] - the errors of anchor center and width
+										   # if current_iou > 0.7
+											# change bounding box type to "positive"
+											# add counter to number of anchors detected for gt bbox
+											# if the anchor iou is best for (x,y) on feature map
+											   # update best iou for that (x,y) loacation
+											   # update best reg
+										   # if 0.3<current_iou<0.7
+											# change bounding box type to "neutral"
+										   # if current_iou<0.3
+											# set bounding box type to "neg"
 						
 						# get IOU of the current GT box and the current anchor box
 						curr_iou = iou([gta[bbox_num, 0], gta[bbox_num, 2], gta[bbox_num, 1], gta[bbox_num, 3]], [x1_anc, y1_anc, x2_anc, y2_anc])
@@ -197,14 +220,13 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 						start = 4 * (anchor_ratio_idx + n_anchratios * anchor_size_idx)
 						y_rpn_regr[jy, ix, start:start+4] = best_regr
 
-	# we ensure that every bbox has at least one positive RPN region
-
-	for idx in range(num_anchors_for_bbox.shape[0]):
-		if num_anchors_for_bbox[idx] == 0:
-			# no box with an IOU greater than zero ...
-			if best_anchor_for_bbox[idx, 0] == -1:
-				continue
-			y_is_box_valid[
+	
+	for idx in range(num_anchors_for_bbox.shape[0]):	#go over all gtbbox. each has a number of anchors
+		if num_anchors_for_bbox[idx] == 0:			#if no positive anchors were found
+			# no box with an IOU greater than zero ...	   #update y_is_box_valid=1 at the best possible anchor of bbox.  
+			if best_anchor_for_bbox[idx, 0] == -1:		   #update y_rpn_overlap=1 at the best possible anchor of bbox.  
+				continue				   #update y_rpn_reg with best reg(dx) anchor of bbox.
+			y_is_box_valid[					   #update the array of best anchor for bbox with best anchor
 				best_anchor_for_bbox[idx,0], best_anchor_for_bbox[idx,1], best_anchor_for_bbox[idx,2] + n_anchratios *
 				best_anchor_for_bbox[idx,3]] = 1
 			y_rpn_overlap[
@@ -245,7 +267,9 @@ def calc_rpn(C, img_data, width, height, resized_width, resized_height, img_leng
 	y_rpn_regr = np.concatenate([np.repeat(y_rpn_overlap, 4, axis=1), y_rpn_regr], axis=1)
 
 	return np.copy(y_rpn_cls), np.copy(y_rpn_regr)
-
+	# we return the rpn_reg for all possible anchors, related with a certain gtbbox. 
+	# we also return the class of each anchor - is it background of foreground
+	# y_is_box_valid IS THE CLASSIFICATION FOR FOREGROUND/BACKGROUND
 
 class threadsafe_iter:
 	"""Takes an iterator/generator and makes it thread-safe by
@@ -271,6 +295,12 @@ def threadsafe_generator(f):
 	return g
 
 def get_anchor_gt(all_img_data, class_count, C, img_length_calc_function, backend, mode='train'):
+# inputs: 
+#	all_img_data = database contating parsed data from the annotation XML of all images
+#	class_count = total number of possible classes
+#	img_length_calc_function = output size of feature map, based on RPN network type (VGG16/ResNet)
+#	mode = 'train', can also be 'val'. states if the the dataset is 'train' or 'val'
+#	C = config file with all defenitions to run faster-RCNN
 
 	# The following line is not useful with Python 3.5, it is kept for the legacy
 	# all_img_data = sorted(all_img_data)
@@ -279,9 +309,9 @@ def get_anchor_gt(all_img_data, class_count, C, img_length_calc_function, backen
 
 	while True:
 		if mode == 'train':
-			np.random.shuffle(all_img_data)
+			np.random.shuffle(all_img_data)	#shuffle train images so that each batch is random
 
-		for img_data in all_img_data:
+		for img_data in all_img_data:	#img_Data is a dictionary containg all annoations of images
 			try:
 
 				if C.balanced_classes and sample_selector.skip_sample_for_balanced_class(img_data):
@@ -290,7 +320,7 @@ def get_anchor_gt(all_img_data, class_count, C, img_length_calc_function, backen
 				# read in image, and optionally add augmentation
 
 				if mode == 'train':
-					img_data_aug, x_img = data_augment.augment(img_data, C, augment=True)
+					img_data_aug, x_img = data_augment.augment(img_data, C, augment=True) #perform data augmentation
 				else:
 					img_data_aug, x_img = data_augment.augment(img_data, C, augment=False)
 
@@ -306,6 +336,7 @@ def get_anchor_gt(all_img_data, class_count, C, img_length_calc_function, backen
 				# resize the image so that smalles side is length = 600px
 				x_img = cv2.resize(x_img, (resized_width, resized_height), interpolation=cv2.INTER_CUBIC)
 
+				# after image has been resized, we can now find the rpn of the single image
 				try:
 					y_rpn_cls, y_rpn_regr = calc_rpn(C, img_data_aug, width, height, resized_width, resized_height, img_length_calc_function)
 				except:
